@@ -126,6 +126,15 @@ func (m *Migrate) Create(ctx context.Context, tables ...*Table) error {
 
 func (m *Migrate) create(ctx context.Context, tx dialect.Tx, tables ...*Table) error {
 	for _, t := range tables {
+		if !m.withForeignKeys {
+			for _, f := range t.ForeignKeys {
+				idx := &Index{Name: f.Symbol, Columns: f.Columns}
+				for _, c := range idx.Columns {
+					c.indexes.append(idx)
+				}
+			}
+			t.Indexes = append(t.Indexes)
+		}
 		m.setupTable(t)
 		switch exist, err := m.tableExist(ctx, tx, t.Name); {
 		case err != nil:
