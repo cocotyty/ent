@@ -344,6 +344,14 @@ func (fk ForeignKey) DSL() *sql.ForeignKeyBuilder {
 	return dsl
 }
 
+func (fk ForeignKey) columnNames() []string {
+	columns := make([]string, 0, len(fk.Columns))
+	for _, c := range fk.Columns {
+		columns = append(columns, c.Name)
+	}
+	return columns
+}
+
 // ReferenceOption for constraint actions.
 type ReferenceOption string
 

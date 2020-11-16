@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/facebook/ent/dialect"
 	"github.com/facebook/ent/dialect/sql"
@@ -126,16 +127,27 @@ func (m *Migrate) Create(ctx context.Context, tables ...*Table) error {
 
 func (m *Migrate) create(ctx context.Context, tx dialect.Tx, tables ...*Table) error {
 	for _, t := range tables {
+		m.setupTable(t)
 		if !m.withForeignKeys {
+			indexSet := map[string]bool{}
+			for _, idx := range t.Indexes {
+				indexSet[strings.Join(idx.columnNames(), "/")] = true
+			}
 			for _, f := range t.ForeignKeys {
-				idx := &Index{Name: f.Symbol, Columns: f.Columns}
+				_, exist := indexSet[strings.Join(f.columnNames(), "/")]
+				if exist {
+					continue
+				}
+				if len(f.Columns) == 1 && f.Columns[0].Unique {
+					continue
+				}
+				idx := &Index{Name: strings.Join(f.columnNames(), "_"), Columns: f.Columns}
 				for _, c := range idx.Columns {
 					c.indexes.append(idx)
 				}
+				t.Indexes = append(t.Indexes, idx)
 			}
-			t.Indexes = append(t.Indexes)
 		}
-		m.setupTable(t)
 		switch exist, err := m.tableExist(ctx, tx, t.Name); {
 		case err != nil:
 			return err
