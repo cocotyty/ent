@@ -6,6 +6,7 @@ package gen
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"go/token"
 	"go/types"
@@ -17,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/facebook/ent"
+	"github.com/facebook/ent/dialect/entsql"
 	"github.com/facebook/ent/dialect/sql/schema"
 	"github.com/facebook/ent/entc/load"
 	"github.com/facebook/ent/schema/field"
@@ -222,10 +224,18 @@ func (t Type) Label() string {
 
 // Table returns SQL table name of the node/type.
 func (t Type) Table() string {
+	if ant := t.EntSQL(); ant != nil && ant.Table != "" {
+		return ant.Table
+	}
 	if t.schema != nil && t.schema.Config.Table != "" {
 		return t.schema.Config.Table
 	}
 	return snake(rules.Pluralize(t.Name))
+}
+
+// EntSQL returns the EntSQL annotation if exists.
+func (t Type) EntSQL() *entsql.Annotation {
+	return entsqlAnnotate(t.Annotations)
 }
 
 // Package returns the package name of this node.
@@ -528,7 +538,7 @@ func (t *Type) resolveFKs() error {
 		fk := &ForeignKey{
 			Edge: e,
 			Field: &Field{
-				Name:        e.Rel.Column(),
+				Name:        builderField(e.Rel.Column()),
 				Type:        refid.Type,
 				Nillable:    true,
 				Optional:    true,
@@ -755,6 +765,11 @@ func (f Field) EnumName(enum string) string {
 // Validator returns the validator name.
 func (f Field) Validator() string { return pascal(f.Name) + "Validator" }
 
+// EntSQL returns the EntSQL annotation if exists.
+func (f Field) EntSQL() *entsql.Annotation {
+	return entsqlAnnotate(f.Annotations)
+}
+
 // mutMethods returns the method names of mutation interface.
 var mutMethods = func() map[string]struct{} {
 	t := reflect.TypeOf(new(ent.Mutation)).Elem()
@@ -892,6 +907,9 @@ func (f Field) Column() *schema.Column {
 
 // size returns the the field size defined in the schema.
 func (f Field) size() int64 {
+	if ant := f.EntSQL(); ant != nil && ant.Size != 0 {
+		return ant.Size
+	}
 	if f.def != nil && f.def.Size != nil {
 		return *f.def.Size
 	}
@@ -902,7 +920,7 @@ func (f Field) size() int64 {
 func (f Field) PK() *schema.Column {
 	c := &schema.Column{
 		Name:      f.StorageKey(),
-		Type:      field.TypeInt,
+		Type:      f.Type.Type,
 		Key:       schema.PrimaryKey,
 		Increment: true,
 	}
@@ -1100,6 +1118,11 @@ func (e Edge) BuilderField() string {
 	return builderField(e.Name)
 }
 
+// EagerLoadField returns the struct field (of query builder) for storing the eager-loading info.
+func (e Edge) EagerLoadField() string {
+	return "with" + pascal(e.Name)
+}
+
 // StructField returns the struct member of the edge in the model.
 func (e Edge) StructField() string {
 	return pascal(e.Name)
@@ -1108,7 +1131,7 @@ func (e Edge) StructField() string {
 // StructFKField returns the struct member for holding the edge
 // foreign-key in the model.
 func (e Edge) StructFKField() string {
-	return e.Rel.Column()
+	return builderField(e.Rel.Column())
 }
 
 // OwnFK indicates if the foreign-key of this edge is owned by the edge
@@ -1246,6 +1269,27 @@ func builderField(name string) string {
 		return "_" + name
 	}
 	return name
+}
+
+// entsqlAnnotate extracts the entsql annotation from a loaded annotation format.
+func entsqlAnnotate(annotation map[string]interface{}) *entsql.Annotation {
+	annotate := &entsql.Annotation{}
+	if annotation == nil || annotation[annotate.Name()] == nil {
+		return nil
+	}
+	switch raw := annotation[annotate.Name()].(type) {
+	case []interface{}:
+		for i := range raw {
+			if buf, err := json.Marshal(raw[i]); err == nil {
+				_ = json.Unmarshal(buf, &annotate)
+			}
+		}
+	default:
+		if buf, err := json.Marshal(annotation[annotate.Name()]); err == nil {
+			_ = json.Unmarshal(buf, &annotate)
+		}
+	}
+	return annotate
 }
 
 var (
